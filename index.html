@@ -22,6 +22,7 @@
     --ok: #16a34a;
     --warn: #d97706;
     --err: #dc2626;
+    --chip-bg: #eef2ff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -36,6 +37,7 @@
       --bubble-other: #2a2e34;
       --bubble-other-fg: #f0f0f0;
       --border: #2c2f34;
+      --chip-bg: #1e2a44;
     }
   }
   * { box-sizing: border-box; }
@@ -107,6 +109,15 @@
     color: var(--accent);
     border: 1px solid var(--accent);
   }
+  button.link {
+    background: none;
+    border: none;
+    color: var(--accent);
+    padding: 0;
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: underline;
+  }
   .my-id-box {
     display: flex;
     align-items: center;
@@ -133,10 +144,56 @@
   .status.connecting .dot { background: var(--warn); }
   .status.connected .dot { background: var(--ok); }
   .status.error .dot { background: var(--err); }
+  .error-text {
+    color: var(--err);
+    font-size: 12px;
+    margin-top: 8px;
+    display: none;
+  }
+  .contacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .contact-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 6px 6px 12px;
+    font-size: 13px;
+  }
+  .contact-chip button.name {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-weight: 600;
+    padding: 0;
+    cursor: pointer;
+  }
+  .contact-chip button.remove {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    line-height: 18px;
+    padding: 0;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .empty-hint {
+    color: var(--muted);
+    font-size: 12px;
+  }
   #log {
     flex: 1;
-    min-height: 260px;
-    max-height: 45vh;
+    min-height: 220px;
+    max-height: 40vh;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -171,6 +228,7 @@
   }
   .composer { display: flex; gap: 8px; }
   a { color: var(--accent); }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -178,29 +236,49 @@
   <h1>P2P チャット(テスト用)</h1>
   <div class="sub">端末間でメッセージが届くか確認するサンプルです</div>
 
-  <div class="card">
-    <span class="field-label">自分のID(相手に伝える/リンクを共有する)</span>
+  <!-- ユーザー登録前 -->
+  <div class="card" id="registerCard">
+    <span class="field-label">ユーザー名を登録(英数字・アンダースコア・ハイフン、3〜20文字)</span>
+    <div class="row">
+      <input type="text" id="usernameInput" placeholder="例: taro-123" maxlength="20">
+      <button id="registerBtn">登録</button>
+    </div>
+    <div class="error-text" id="registerError"></div>
+  </div>
+
+  <!-- ユーザー登録後 -->
+  <div class="card" id="profileCard" hidden>
+    <span class="field-label">あなたのユーザー名(相手に伝える/リンクを共有する)</span>
     <div class="my-id-box">
       <span id="myId">生成中…</span>
     </div>
     <div class="row" style="margin-top:10px;">
-      <button class="secondary" id="copyIdBtn">IDをコピー</button>
+      <button class="secondary" id="copyIdBtn">名前をコピー</button>
       <button class="secondary" id="copyLinkBtn">招待リンクをコピー</button>
+    </div>
+    <div style="margin-top:10px;">
+      <button class="link" id="changeUsernameBtn">ユーザー名を変更する</button>
     </div>
   </div>
 
-  <div class="card">
-    <span class="field-label">相手のIDを入力して接続</span>
-    <div class="row">
-      <input type="text" id="peerIdInput" placeholder="相手のIDを貼り付け">
-      <button id="connectBtn">接続</button>
+  <div class="card" id="connectCard" hidden>
+    <span class="field-label">よく話す相手</span>
+    <div class="contacts" id="contacts"></div>
+    <div class="empty-hint" id="contactsEmptyHint">まだ相手がいません。下から接続すると自動的に追加されます。</div>
+
+    <div style="margin-top:14px;">
+      <span class="field-label">相手のユーザー名を入力して接続</span>
+      <div class="row">
+        <input type="text" id="peerIdInput" placeholder="相手のユーザー名を入力">
+        <button id="connectBtn">接続</button>
+      </div>
     </div>
     <div class="status" id="status" style="margin-top:10px;">
       <span class="dot"></span><span id="statusText">未接続</span>
     </div>
   </div>
 
-  <div class="card" style="flex:1; display:flex; flex-direction:column;">
+  <div class="card" id="chatCard" style="flex:1; display:flex; flex-direction:column;" hidden>
     <div id="log"></div>
     <div class="composer" style="margin-top:10px;">
       <input type="text" id="msgInput" placeholder="メッセージを入力" disabled>
@@ -210,19 +288,92 @@
 </div>
 
 <script>
+const ID_PREFIX = 'testchat-';
+const USERNAME_KEY = 'testchat_username';
+const CONTACTS_KEY = 'testchat_contacts';
+const USERNAME_RE = /^[a-zA-Z0-9_-]{3,20}$/;
+
+const registerCard = document.getElementById('registerCard');
+const usernameInput = document.getElementById('usernameInput');
+const registerBtn = document.getElementById('registerBtn');
+const registerError = document.getElementById('registerError');
+
+const profileCard = document.getElementById('profileCard');
 const myIdEl = document.getElementById('myId');
+const copyIdBtn = document.getElementById('copyIdBtn');
+const copyLinkBtn = document.getElementById('copyLinkBtn');
+const changeUsernameBtn = document.getElementById('changeUsernameBtn');
+
+const connectCard = document.getElementById('connectCard');
+const contactsEl = document.getElementById('contacts');
+const contactsEmptyHint = document.getElementById('contactsEmptyHint');
 const statusEl = document.getElementById('status');
 const statusTextEl = document.getElementById('statusText');
 const peerIdInput = document.getElementById('peerIdInput');
 const connectBtn = document.getElementById('connectBtn');
+
+const chatCard = document.getElementById('chatCard');
 const msgInput = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
 const logEl = document.getElementById('log');
-const copyIdBtn = document.getElementById('copyIdBtn');
-const copyLinkBtn = document.getElementById('copyLinkBtn');
 
 let peer = null;
 let conn = null;
+let myUsername = null;
+
+function getContacts() {
+  try {
+    return JSON.parse(localStorage.getItem(CONTACTS_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveContact(name) {
+  const contacts = getContacts();
+  if (!contacts.includes(name)) {
+    contacts.unshift(name);
+    localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts.slice(0, 30)));
+    renderContacts();
+  }
+}
+
+function removeContact(name) {
+  const contacts = getContacts().filter((c) => c !== name);
+  localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts));
+  renderContacts();
+}
+
+function renderContacts() {
+  const contacts = getContacts();
+  contactsEl.innerHTML = '';
+  contactsEmptyHint.hidden = contacts.length > 0;
+  contacts.forEach((name) => {
+    const chip = document.createElement('div');
+    chip.className = 'contact-chip';
+
+    const nameBtn = document.createElement('button');
+    nameBtn.className = 'name';
+    nameBtn.textContent = name;
+    nameBtn.addEventListener('click', () => {
+      peerIdInput.value = name;
+      startConnect(name);
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = '削除';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeContact(name);
+    });
+
+    chip.appendChild(nameBtn);
+    chip.appendChild(removeBtn);
+    contactsEl.appendChild(chip);
+  });
+}
 
 function addMsg(text, cls) {
   const div = document.createElement('div');
@@ -244,12 +395,18 @@ function setConnected(isConnected) {
   peerIdInput.disabled = isConnected;
 }
 
+function stripPrefix(id) {
+  return id.startsWith(ID_PREFIX) ? id.slice(ID_PREFIX.length) : id;
+}
+
 function wireConnection(connection) {
   conn = connection;
+  const remoteName = stripPrefix(conn.peer);
   conn.on('open', () => {
-    setStatus('connected', '接続済み: ' + conn.peer);
+    setStatus('connected', '接続済み: ' + remoteName);
     setConnected(true);
-    addMsg('接続しました (相手: ' + conn.peer + ')', 'sys');
+    addMsg('接続しました (相手: ' + remoteName + ')', 'sys');
+    saveContact(remoteName);
   });
   conn.on('data', (data) => {
     addMsg(String(data), 'other');
@@ -266,16 +423,25 @@ function wireConnection(connection) {
   });
 }
 
-function initPeer() {
-  peer = new Peer();
+function startConnect(name) {
+  const targetId = name.trim();
+  if (!targetId || !peer) return;
+  setStatus('connecting', targetId + ' に接続中…');
+  const connection = peer.connect(ID_PREFIX + targetId, { reliable: true });
+  wireConnection(connection);
+}
 
-  peer.on('open', (id) => {
-    myIdEl.textContent = id;
+function initPeer(username) {
+  peer = new Peer(ID_PREFIX + username);
+
+  peer.on('open', () => {
+    myIdEl.textContent = username;
+    renderContacts();
     const params = new URLSearchParams(location.search);
     const target = params.get('to');
-    if (target) {
+    if (target && target !== username) {
       peerIdInput.value = target;
-      addMsg('リンクから相手のIDを読み込みました。「接続」を押してください', 'sys');
+      addMsg('リンクから相手の名前を読み込みました。「接続」を押してください', 'sys');
     }
   });
 
@@ -288,6 +454,12 @@ function initPeer() {
   });
 
   peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') {
+      addMsg('そのユーザー名は既に使われています。別の名前で登録し直してください', 'sys');
+      localStorage.removeItem(USERNAME_KEY);
+      showRegisterForm('そのユーザー名は既に使われています。別の名前を試してください。');
+      return;
+    }
     setStatus('error', 'エラー: ' + err.type);
     addMsg('Peerエラー: ' + err.type, 'sys');
   });
@@ -297,14 +469,53 @@ function initPeer() {
   });
 }
 
-connectBtn.addEventListener('click', () => {
-  const targetId = peerIdInput.value.trim();
-  if (!targetId) return;
-  if (!peer) return;
-  setStatus('connecting', targetId + ' に接続中…');
-  const connection = peer.connect(targetId, { reliable: true });
-  wireConnection(connection);
+function showRegisterForm(errorMsg) {
+  if (peer) {
+    peer.destroy();
+    peer = null;
+  }
+  conn = null;
+  registerCard.hidden = false;
+  profileCard.hidden = true;
+  connectCard.hidden = true;
+  chatCard.hidden = true;
+  registerError.style.display = errorMsg ? 'block' : 'none';
+  registerError.textContent = errorMsg || '';
+  usernameInput.value = '';
+  usernameInput.focus();
+}
+
+function showMainUI(username) {
+  myUsername = username;
+  registerCard.hidden = true;
+  profileCard.hidden = false;
+  connectCard.hidden = false;
+  chatCard.hidden = false;
+  initPeer(username);
+}
+
+function register() {
+  const name = usernameInput.value.trim();
+  if (!USERNAME_RE.test(name)) {
+    registerError.style.display = 'block';
+    registerError.textContent = '英数字・アンダースコア・ハイフンのみ、3〜20文字で入力してください';
+    return;
+  }
+  localStorage.setItem(USERNAME_KEY, name);
+  showMainUI(name);
+}
+
+registerBtn.addEventListener('click', register);
+usernameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') register();
 });
+
+changeUsernameBtn.addEventListener('click', () => {
+  localStorage.removeItem(USERNAME_KEY);
+  showRegisterForm();
+});
+
+connectBtn.addEventListener('click', () => startConnect(peerIdInput.value));
 
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', (e) => {
@@ -323,7 +534,7 @@ copyIdBtn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(myIdEl.textContent);
     copyIdBtn.textContent = 'コピーしました';
-    setTimeout(() => (copyIdBtn.textContent = 'IDをコピー'), 1500);
+    setTimeout(() => (copyIdBtn.textContent = '名前をコピー'), 1500);
   } catch (e) {
     alert('コピーできませんでした。手動で選択してください。');
   }
@@ -340,7 +551,12 @@ copyLinkBtn.addEventListener('click', async () => {
   }
 });
 
-initPeer();
+const savedUsername = localStorage.getItem(USERNAME_KEY);
+if (savedUsername && USERNAME_RE.test(savedUsername)) {
+  showMainUI(savedUsername);
+} else {
+  showRegisterForm();
+}
 </script>
 </body>
 </html>
