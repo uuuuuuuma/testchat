@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2P チャット (テスト用)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-fg: #ffffff;
+    --bubble-me: #2563eb;
+    --bubble-me-fg: #ffffff;
+    --bubble-other: #e5e7eb;
+    --bubble-other-fg: #111827;
+    --border: #e2e4e8;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --err: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101214;
+      --card: #1b1e22;
+      --text: #f0f0f0;
+      --muted: #9aa1ac;
+      --accent: #3b82f6;
+      --accent-fg: #ffffff;
+      --bubble-me: #3b82f6;
+      --bubble-me-fg: #ffffff;
+      --bubble-other: #2a2e34;
+      --bubble-other-fg: #f0f0f0;
+      --border: #2c2f34;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .app {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 4px 0 0;
+    text-align: center;
+  }
+  .sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin: -8px 0 4px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .row { display: flex; gap: 8px; }
+  .field-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: block;
+  }
+  input[type=text] {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  button {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .my-id-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 15px;
+    word-break: break-all;
+  }
+  .status {
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .status.connecting .dot { background: var(--warn); }
+  .status.connected .dot { background: var(--ok); }
+  .status.error .dot { background: var(--err); }
+  #log {
+    flex: 1;
+    min-height: 260px;
+    max-height: 45vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 2px;
+  }
+  .msg {
+    max-width: 78%;
+    padding: 8px 12px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .msg.me {
+    align-self: flex-end;
+    background: var(--bubble-me);
+    color: var(--bubble-me-fg);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.other {
+    align-self: flex-start;
+    background: var(--bubble-other);
+    color: var(--bubble-other-fg);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.sys {
+    align-self: center;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .composer { display: flex; gap: 8px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>P2P チャット(テスト用)</h1>
+  <div class="sub">端末間でメッセージが届くか確認するサンプルです</div>
+
+  <div class="card">
+    <span class="field-label">自分のID(相手に伝える/リンクを共有する)</span>
+    <div class="my-id-box">
+      <span id="myId">生成中…</span>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="secondary" id="copyIdBtn">IDをコピー</button>
+      <button class="secondary" id="copyLinkBtn">招待リンクをコピー</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="field-label">相手のIDを入力して接続</span>
+    <div class="row">
+      <input type="text" id="peerIdInput" placeholder="相手のIDを貼り付け">
+      <button id="connectBtn">接続</button>
+    </div>
+    <div class="status" id="status" style="margin-top:10px;">
+      <span class="dot"></span><span id="statusText">未接続</span>
+    </div>
+  </div>
+
+  <div class="card" style="flex:1; display:flex; flex-direction:column;">
+    <div id="log"></div>
+    <div class="composer" style="margin-top:10px;">
+      <input type="text" id="msgInput" placeholder="メッセージを入力" disabled>
+      <button id="sendBtn" disabled>送信</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const myIdEl = document.getElementById('myId');
+const statusEl = document.getElementById('status');
+const statusTextEl = document.getElementById('statusText');
+const peerIdInput = document.getElementById('peerIdInput');
+const connectBtn = document.getElementById('connectBtn');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const logEl = document.getElementById('log');
+const copyIdBtn = document.getElementById('copyIdBtn');
+const copyLinkBtn = document.getElementById('copyLinkBtn');
+
+let peer = null;
+let conn = null;
+
+function addMsg(text, cls) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.textContent = text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(mode, text) {
+  statusEl.className = 'status ' + mode;
+  statusTextEl.textContent = text;
+}
+
+function setConnected(isConnected) {
+  msgInput.disabled = !isConnected;
+  sendBtn.disabled = !isConnected;
+  connectBtn.disabled = isConnected;
+  peerIdInput.disabled = isConnected;
+}
+
+function wireConnection(connection) {
+  conn = connection;
+  conn.on('open', () => {
+    setStatus('connected', '接続済み: ' + conn.peer);
+    setConnected(true);
+    addMsg('接続しました (相手: ' + conn.peer + ')', 'sys');
+  });
+  conn.on('data', (data) => {
+    addMsg(String(data), 'other');
+  });
+  conn.on('close', () => {
+    setStatus('error', '切断されました');
+    setConnected(false);
+    addMsg('接続が切断されました', 'sys');
+    conn = null;
+  });
+  conn.on('error', (err) => {
+    setStatus('error', 'エラー: ' + err);
+    addMsg('接続エラー: ' + err, 'sys');
+  });
+}
+
+function initPeer() {
+  peer = new Peer();
+
+  peer.on('open', (id) => {
+    myIdEl.textContent = id;
+    const params = new URLSearchParams(location.search);
+    const target = params.get('to');
+    if (target) {
+      peerIdInput.value = target;
+      addMsg('リンクから相手のIDを読み込みました。「接続」を押してください', 'sys');
+    }
+  });
+
+  peer.on('connection', (connection) => {
+    if (conn) {
+      connection.close();
+      return;
+    }
+    wireConnection(connection);
+  });
+
+  peer.on('error', (err) => {
+    setStatus('error', 'エラー: ' + err.type);
+    addMsg('Peerエラー: ' + err.type, 'sys');
+  });
+
+  peer.on('disconnected', () => {
+    setStatus('error', 'サーバーから切断されました');
+  });
+}
+
+connectBtn.addEventListener('click', () => {
+  const targetId = peerIdInput.value.trim();
+  if (!targetId) return;
+  if (!peer) return;
+  setStatus('connecting', targetId + ' に接続中…');
+  const connection = peer.connect(targetId, { reliable: true });
+  wireConnection(connection);
+});
+
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendMessage();
+});
+
+function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text || !conn || !conn.open) return;
+  conn.send(text);
+  addMsg(text, 'me');
+  msgInput.value = '';
+}
+
+copyIdBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(myIdEl.textContent);
+    copyIdBtn.textContent = 'コピーしました';
+    setTimeout(() => (copyIdBtn.textContent = 'IDをコピー'), 1500);
+  } catch (e) {
+    alert('コピーできませんでした。手動で選択してください。');
+  }
+});
+
+copyLinkBtn.addEventListener('click', async () => {
+  const url = location.origin + location.pathname + '?to=' + encodeURIComponent(myIdEl.textContent);
+  try {
+    await navigator.clipboard.writeText(url);
+    copyLinkBtn.textContent = 'コピーしました';
+    setTimeout(() => (copyLinkBtn.textContent = '招待リンクをコピー'), 1500);
+  } catch (e) {
+    alert('コピーできませんでした: ' + url);
+  }
+});
+
+initPeer();
+</script>
+</body>
+</html>
